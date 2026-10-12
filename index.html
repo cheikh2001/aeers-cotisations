@@ -558,7 +558,7 @@
             </a>
             <div class="d-flex align-items-center gap-3">
                 <div class="year-selector">
-                    <label class="text-muted mb-0">Année :</label>
+                    <label class="text-muted mb-0">Exercice :</label>
                     <select class="form-select form-select-sm" id="year-select" onchange="changeYear()">
                     </select>
                 </div>
@@ -652,12 +652,7 @@
                 <div class="table-container" id="cotisations-table-container" style="display: none;">
                     <table class="table members-table" id="members-table">
                         <thead>
-                            <tr>
-                                <th><i class="bi bi-person"></i> Membre</th>
-                                <th>Jan</th><th>Fév</th><th>Mar</th><th>Avr</th><th>Mai</th><th>Juin</th>
-                                <th>Juil</th><th>Aoû</th><th>Sep</th><th>Oct</th><th>Nov</th><th>Déc</th>
-                                <th>Total</th>
-                            </tr>
+                            <tr id="members-table-head"></tr>
                         </thead>
                         <tbody></tbody>
                     </table>
@@ -723,14 +718,7 @@
                                 <select class="form-select" id="member-select"></select>
                             </div>
                             <div class="mb-3">
-                                <select class="form-select" id="month-select">
-                                    <option value="01">Janvier</option><option value="02">Février</option>
-                                    <option value="03">Mars</option><option value="04">Avril</option>
-                                    <option value="05">Mai</option><option value="06">Juin</option>
-                                    <option value="07">Juillet</option><option value="08">Août</option>
-                                    <option value="09">Septembre</option><option value="10">Octobre</option>
-                                    <option value="11">Novembre</option><option value="12">Décembre</option>
-                                </select>
+                                <select class="form-select" id="month-select"></select>
                             </div>
                             <div class="d-grid gap-2">
                                 <button class="btn btn-success" onclick="markPayment()">
@@ -966,6 +954,14 @@
 
         // ==================== CONFIGURATION ====================
         let currentYear = new Date().getFullYear();
+        // Exercice de cotisation : d'octobre à septembre
+        const EXERCISE_START_MONTH = 10;
+        const FIRST_EXERCISE_YEAR = 2025;
+        const MONTH_NAMES = ['Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin',
+                             'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre'];
+        const MONTH_SHORT = ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Juin',
+                             'Juil', 'Aoû', 'Sep', 'Oct', 'Nov', 'Déc'];
+        let selectedExercise = getExerciseStartYear(new Date());
         const STORAGE_KEY = 'aeers-data-v2';
         const PASSWORD_KEY = 'aeers-admin-password';
         const SESSION_KEY = 'aeers-admin-session';
@@ -985,6 +981,10 @@
                 if (docSnap.exists) {
                     data = docSnap.data();
                     console.log('✅ Données chargées depuis Firebase');
+                    if (migratePayments(data)) {
+                        await DATA_DOC.set(data);
+                        console.log('✅ Cotisations converties au format année-mois');
+                    }
                 } else {
                     // Première utilisation - créer les données initiales
                     data = getDefaultData();
@@ -1005,6 +1005,7 @@
                 const localData = localStorage.getItem(STORAGE_KEY);
                 if (localData) {
                     data = JSON.parse(localData);
+                    migratePayments(data);
                 } else {
                     data = getDefaultData();
                 }
@@ -1037,6 +1038,10 @@
             DATA_DOC.onSnapshot((doc) => {
                 if (doc.exists && !isLoading) {
                     const newData = doc.data();
+                    // Une ancienne version de la page a pu réécrire l'ancien format
+                    if (migratePayments(newData)) {
+                        DATA_DOC.set(newData);
+                    }
                     // Ne pas mettre à jour si c'est notre propre modification
                     if (JSON.stringify(newData) !== JSON.stringify(data)) {
                         data = newData;
@@ -1048,6 +1053,54 @@
                 console.error('Erreur écoute Firebase:', error);
                 isOnline = false;
             });
+        }
+
+        // ==================== MOIS / EXERCICES ====================
+        // Les cotisations sont stockées par clé "AAAA-MM" (ex: "2026-10").
+        // L'ancien format n'avait que le mois ("10") : Oct–Déc = 2025, Jan–Sep = 2026.
+        function migratePayments(d) {
+            let changed = false;
+            (d.members || []).forEach(member => {
+                const payments = member.payments || {};
+                const migrated = {};
+                Object.keys(payments).forEach(key => {
+                    if (/^\d{2}$/.test(key)) {
+                        changed = true;
+                        if (!payments[key]) return;
+                        const year = parseInt(key) >= EXERCISE_START_MONTH ? 2025 : 2026;
+                        migrated[`${year}-${key}`] = true;
+                    } else if (payments[key]) {
+                        migrated[key] = true;
+                    }
+                });
+                member.payments = migrated;
+            });
+            return changed;
+        }
+
+        function monthKeyOf(year, month) {
+            return `${year}-${month.toString().padStart(2, '0')}`;
+        }
+
+        function monthLabel(key, short = false) {
+            const [year, month] = key.split('-');
+            const names = short ? MONTH_SHORT : MONTH_NAMES;
+            return `${names[parseInt(month) - 1]} ${short ? year.slice(2) : year}`;
+        }
+
+        function getExerciseStartYear(date) {
+            const month = date.getMonth() + 1;
+            return month >= EXERCISE_START_MONTH ? date.getFullYear() : date.getFullYear() - 1;
+        }
+
+        // Les 12 mois consécutifs d'un exercice (Oct AAAA → Sep AAAA+1)
+        function getExerciseMonths(startYear) {
+            const keys = [];
+            for (let i = 0; i < 12; i++) {
+                const m = EXERCISE_START_MONTH - 1 + i;
+                keys.push(monthKeyOf(startYear + Math.floor(m / 12), (m % 12) + 1));
+            }
+            return keys;
         }
 
         function showLoadingOverlay(show) {
@@ -1281,14 +1334,31 @@
             const options = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
             document.getElementById('current-date').textContent = new Date().toLocaleDateString('fr-FR', options);
 
-            // Sélecteur d'année
+            // Sélecteur d'exercice (Oct → Sep)
             const yearSelect = document.getElementById('year-select');
-            for (let year = 2024; year <= 2030; year++) {
+            for (let year = FIRST_EXERCISE_YEAR; year <= selectedExercise + 1; year++) {
                 const option = document.createElement('option');
                 option.value = year;
-                option.textContent = year;
-                if (year === currentYear) option.selected = true;
+                option.textContent = `${year}-${year + 1}`;
+                if (year === selectedExercise) option.selected = true;
                 yearSelect.appendChild(option);
+            }
+
+            // Mois disponibles pour marquer une cotisation (Oct 2025 → 12 mois à l'avance)
+            const monthSelect = document.getElementById('month-select');
+            const now = new Date();
+            const currentKey = monthKeyOf(now.getFullYear(), now.getMonth() + 1);
+            for (let year = FIRST_EXERCISE_YEAR; year <= selectedExercise + 1; year++) {
+                const group = document.createElement('optgroup');
+                group.label = `Exercice ${year}-${year + 1}`;
+                getExerciseMonths(year).forEach(key => {
+                    const option = document.createElement('option');
+                    option.value = key;
+                    option.textContent = monthLabel(key);
+                    if (key === currentKey) option.selected = true;
+                    group.appendChild(option);
+                });
+                monthSelect.appendChild(group);
             }
 
             // Date du jour pour les formulaires
@@ -1312,6 +1382,12 @@
         }
 
         function updateTables() {
+            const months = getExerciseMonths(selectedExercise);
+            document.getElementById('members-table-head').innerHTML =
+                `<th><i class="bi bi-person"></i> Membre</th>` +
+                months.map(key => `<th>${monthLabel(key, true)}</th>`).join('') +
+                `<th>Total</th>`;
+
             const tbody = document.querySelector('#members-table tbody');
             tbody.innerHTML = '';
 
@@ -1322,9 +1398,8 @@
                 let totalPaid = 0;
 
                 let cells = `<td><strong>${member.name}</strong></td>`;
-                
-                for (let month = 1; month <= 12; month++) {
-                    const monthKey = month.toString().padStart(2, '0');
+
+                for (const monthKey of months) {
                     const isPaid = member.payments[monthKey];
                     if (isPaid) totalPaid++;
 
@@ -1348,7 +1423,8 @@
             document.getElementById('total-members').textContent = data.members.length;
 
             const currentMonth = new Date().getMonth() + 1;
-            const monthKey = currentMonth.toString().padStart(2, '0');
+            const currentYear = new Date().getFullYear();
+            const monthKey = monthKeyOf(currentYear, currentMonth);
 
             // Cotisations du mois
             const paidThisMonth = data.members.filter(m => m.payments[monthKey]).length;
@@ -1459,9 +1535,6 @@
             }
 
             const newMember = { name: name, payments: {} };
-            for (let month = 1; month <= 12; month++) {
-                newMember.payments[month.toString().padStart(2, '0')] = false;
-            }
 
             data.members.push(newMember);
             nameInput.value = '';
@@ -1515,7 +1588,7 @@
 
             updateAll();
             await saveData();
-            showToast(`Cotisation de ${memberName} enregistrée !`, 'success');
+            showToast(`Cotisation de ${memberName} (${monthLabel(month)}) enregistrée !`, 'success');
         }
 
         async function unmarkPayment() {
@@ -1528,7 +1601,7 @@
                 return;
             }
 
-            member.payments[month] = false;
+            delete member.payments[month];
             data.balance -= data.contributionAmount;
 
             updateAll();
@@ -1668,8 +1741,9 @@
         }
 
         function changeYear() {
-            currentYear = parseInt(document.getElementById('year-select').value);
-            updateDashboard();
+            selectedExercise = parseInt(document.getElementById('year-select').value);
+            updateTables();
+            filterMembers();
         }
 
         function resetData() {
