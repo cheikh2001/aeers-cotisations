@@ -1078,7 +1078,7 @@
 
         // ==================== MOIS / EXERCICES ====================
         // Les cotisations sont stockées par clé "AAAA-MM" (ex: "2026-10").
-        // L'ancien format n'avait que le mois ("10") : Oct–Déc = 2025, Jan–Sep = 2026.
+        // L'ancien format n'avait que le mois ("10") : Nov–Déc = 2025, Jan–Oct = 2026.
         function migratePayments(d) {
             let changed = false;
             (d.members || []).forEach(member => {
@@ -1088,7 +1088,7 @@
                     if (/^\d{2}$/.test(key)) {
                         changed = true;
                         if (!payments[key]) return;
-                        const year = parseInt(key) >= EXERCISE_START_MONTH ? 2025 : 2026;
+                        const year = parseInt(key) > EXERCISE_START_MONTH ? 2025 : 2026;
                         migrated[`${year}-${key}`] = true;
                     } else if (payments[key]) {
                         migrated[key] = true;
