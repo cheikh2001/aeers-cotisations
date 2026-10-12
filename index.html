@@ -627,10 +627,8 @@
                 <h4><i class="bi bi-table"></i> État des Cotisations</h4>
                 <div class="d-flex gap-2 flex-wrap align-items-center">
                     <div class="year-selector" id="period-selector" style="display: none;">
-                        <label class="text-muted mb-0" for="period-start">Du</label>
-                        <select class="form-select form-select-sm" id="period-start" onchange="changePeriod('start')"></select>
-                        <label class="text-muted mb-0" for="period-end">au</label>
-                        <select class="form-select form-select-sm" id="period-end" onchange="changePeriod('end')"></select>
+                        <label class="text-muted mb-0" for="table-year"><i class="bi bi-calendar3"></i> Année</label>
+                        <select class="form-select form-select-sm" id="table-year" onchange="changeYear()"></select>
                     </div>
                     <div class="search-box" id="search-box-container">
                         <i class="bi bi-search"></i>
@@ -980,9 +978,8 @@
                              'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre'];
         const MONTH_SHORT = ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Juin',
                              'Juil', 'Aoû', 'Sep', 'Oct', 'Nov', 'Déc'];
-        // Période affichée dans le tableau (clés "AAAA-MM"), définie à l'initialisation
-        let periodStart = null;
-        let periodEnd = null;
+        // Année affichée dans le tableau ('all' = toutes les années)
+        let selectedYear = 'all';
         const STORAGE_KEY = 'aeers-data-v2';
         const PASSWORD_KEY = 'aeers-admin-password';
         const SESSION_KEY = 'aeers-admin-session';
@@ -1471,34 +1468,39 @@
 
         function populateMonthSelects() {
             const keys = getSelectableMonths();
-            const currentKey = getCurrentMonthKey();
-            // Par défaut : tout l'historique jusqu'au mois en cours (aucune case verte masquée)
-            if (!periodStart) periodStart = getFirstPaidMonthKey();
-            if (!periodEnd) periodEnd = currentKey;
+            fillMonthSelect(document.getElementById('month-select'), keys, getCurrentMonthKey());
 
-            fillMonthSelect(document.getElementById('period-start'), keys, periodStart);
-            fillMonthSelect(document.getElementById('period-end'), keys, periodEnd);
-            fillMonthSelect(document.getElementById('month-select'), keys, currentKey);
+            // Bouton Année : du premier mois cotisé jusqu'à l'année prochaine
+            const yearSelect = document.getElementById('table-year');
+            const firstYear = parseInt(getFirstPaidMonthKey().slice(0, 4));
+            const lastYear = new Date().getFullYear() + 1;
+            yearSelect.innerHTML = '<option value="all">Toutes les années</option>';
+            for (let year = firstYear; year <= lastYear; year++) {
+                yearSelect.insertAdjacentHTML('beforeend', `<option value="${year}">${year}</option>`);
+            }
+            yearSelect.value = selectedYear;
             updateTables();
         }
 
-        function changePeriod(changed) {
-            periodStart = document.getElementById('period-start').value;
-            periodEnd = document.getElementById('period-end').value;
-            // Garder une période valide (début ≤ fin)
-            if (periodStart > periodEnd) {
-                if (changed === 'start') periodEnd = periodStart;
-                else periodStart = periodEnd;
-                document.getElementById('period-start').value = periodStart;
-                document.getElementById('period-end').value = periodEnd;
-            }
+        function changeYear() {
+            selectedYear = document.getElementById('table-year').value;
             updateTables();
             filterMembers();
         }
 
+        // Mois affichés : l'année choisie (Jan → Déc), ou tout l'historique jusqu'au mois en cours.
+        // Les mois avant le début des cotisations ne sont pas affichés.
+        function getDisplayedMonths() {
+            const first = getFirstPaidMonthKey();
+            if (selectedYear === 'all') {
+                return getMonthRange(first, getCurrentMonthKey());
+            }
+            const start = monthKeyOf(selectedYear, 1);
+            return getMonthRange(start > first ? start : first, monthKeyOf(selectedYear, 12));
+        }
+
         function updateTables() {
-            const months = getMonthRange(periodStart || getFirstPaidMonthKey(),
-                                         periodEnd || getCurrentMonthKey());
+            const months = getDisplayedMonths();
             document.getElementById('members-table-head').innerHTML =
                 `<th><i class="bi bi-person"></i> Membre</th>` +
                 months.map(key => `<th>${monthLabel(key, true)}</th>`).join('') +
